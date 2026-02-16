@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  serviceName: "mysql"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        envFrom:
+        - secretRef:
+            name: mysql-secrets
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - "mysqladmin -uroot -p${MYSQL_ROOT_PASSWORD} shutdown"
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "mysqladmin ping -uroot -p${MYSQL_ROOT_PASSWORD} -h localhost"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "mysqladmin ping -uroot -p${MYSQL_ROOT_PASSWORD} -h localhost"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "mysqladmin ping -uroot -p${MYSQL_ROOT_PASSWORD} -h localhost"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "manual"
+      resources:
+        requests:
+          storage: 5Gi

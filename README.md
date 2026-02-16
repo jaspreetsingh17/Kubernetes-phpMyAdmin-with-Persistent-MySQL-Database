@@ -1,6 +1,18 @@
-# Kubernetes phpMyAdmin with Persistent MySQL Database
+# Kubernetes phpMyAdmin with Persistent MySQL Database and MinIO S3 Storage
 
-This project deploys phpMyAdmin with a persistent MySQL database on Kubernetes (Docker Desktop). The database persists data even when pods are deleted and recreated.
+This project deploys phpMyAdmin with a persistent MySQL database and MinIO S3-compatible object storage on Kubernetes (Docker Desktop). All data persists even when pods are deleted and recreated.
+
+> **⚠️ WARNING:** The `.env` file is included in this repository for testing and demonstration purposes only. In production environments, **NEVER** commit `.env` files containing sensitive credentials to version control. Always add `.env` to your `.gitignore` file.
+
+## Features
+
+✓ **Persistent Storage** - MySQL and MinIO data survives pod restarts and deletions  
+✓ **S3-Compatible Storage** - MinIO provides Amazon S3-compatible object storage  
+✓ **Secret Management** - Credentials stored in Kubernetes Secrets from .env file  
+✓ **Health Probes** - Startup, Liveness, and Readiness probes configured  
+✓ **Graceful Shutdown** - Proper termination with preStop hooks  
+✓ **Resource Limits** - CPU and memory constraints defined  
+✓ **Production-Ready** - Best practices for Kubernetes deployments
 
 ## Prerequisites
 
@@ -10,82 +22,161 @@ This project deploys phpMyAdmin with a persistent MySQL database on Kubernetes (
 ## Project Structure
 
 ```
-newkube8s/
-├── mysql-pv.yaml              # Persistent Volume & PVC
-├── mysql-deployment.yaml      # MySQL deployment
-├── mysql-service.yaml         # MySQL service
-├── phpmyadmin-deployment.yaml # phpMyAdmin deployment
+project/
+├── .env                       # Environment variables (credentials)
+├── mysql-pv.yaml              # MySQL Persistent Volume for StatefulSet
+├── mysql-statefulset.yaml     # MySQL StatefulSet with probes
+├── mysql-service.yaml         # MySQL headless service
+├── minio-pv.yaml              # MinIO Persistent Volume for StatefulSet
+├── minio-statefulset.yaml     # MinIO StatefulSet with probes
+├── minio-service.yaml         # MinIO API and Console services
+├── phpmyadmin-deployment.yaml # phpMyAdmin deployment with probes
 ├── phpmyadmin-service.yaml    # phpMyAdmin service
+├── deploy.sh                  # Deployment script
+├── cleanup.sh                 # Cleanup script
 └── README.md                  # This file
 ```
-
-## Deployment Steps
-
-### 1. Verify Kubernetes is Running
+Quick Deploy (Recommended)
 
 ```bash
-kubectl cluster-info
-kubectl get nodes
+# Make script executable
+chmod +x deploy.sh
+
+# Run deployment script
+./deploy.sh
 ```
 
-### 2. Deploy MySQL with Persistent Storage
+The script will:
+1. Create Kubernetes Secrets from `.env` file
+2. Create Persistent Volumes and PVCs for MySQL and MinIO
+3. Deploy MySQL with health probes
+4. Deploy MinIO with health probes
+5. Deploy phpMyAdmin with health probes
+6. Show deployment status
+
+### Manual Deployment
+
+If you prefer manual steps:
 
 ```bash
-# Create persistent volume and claim
+# 1. Create Secrets from .env
+kubectl create secret generic mysql-secrets --from-env-file=.env
+kubectl create secret generic minio-secrets --from-env-file=.env
+
+# 2. Create persistent volumes
 kubectl apply -f mysql-pv.yaml
+kubectl apply -f minio-pv.yaml
 
-# Deploy MySQL
-kubectl apply -f mysql-deployment.yaml
-
-# Create MySQL service
+# 3. Deploy MySQL StatefulSet
+kubectl apply -f mysql-statefulset.yaml
 kubectl apply -f mysql-service.yaml
-```
 
-### 3. Deploy phpMyAdmin
+# 4. Deploy MinIO StatefulSet
+kubectl apply -f minio-statefulset.yaml
+kubectl apply -f minio-service.yaml
 
-```bash
-# Deploy phpMyAdmin
+# 5. Deploy phpMyAdmin
 kubectl apply -f phpmyadmin-deployment.yaml
-
-# Create phpMyAdmin service
 kubectl apply -f phpmyadmin-service.yaml
 ```
 
-### 4. Verify Deployment
+### Verify Deployment
 
 ```bash
 # Check all resources
 kubectl get all
 
-# Check persistent volume
+# Check persistent volumes
 kubectl get pv
 kubectl get pvc
-
-# Check pod status
-kubectl get pods
 ```
 
-Wait until all pods are in `Running` state.
+## Access Applications
 
-### 5. Access phpMyAdmin
+### phpMyAdmin
 
 Open your browser and navigate to:
 ```
 http://localhost:30080
 ```
 
-Login credentials:
+Login credentials (from `.env` file):
 - **Server:** mysql
 - **Username:** root
-- **Password:** rootpassword
+- **Password:** (check MYSQL_ROOT_PASSWORD in .env)
 
 Alternatively, use the non-root user:
 - **Username:** dbuser
-- **Password:** dbpassword
+- **Password:** (check MYSQL_PASSWORD in .env)
+
+### MinIO Console
+
+Open your browser and navigate to:
+```
+http://localhost:30090
+```
+
+Login credentials (from `.env` file):
+- **Username:** (check MINIO_ROOT_USER in .env)
+- **Password:** (check MINIO_ROOT_PASSWORD in .env)
+
+### MinIO API Access
+
+The MinIO S3-compatible API is accessible at:
+```
+http://localhost:30091
+```
+
+You can use AWS CLI or any S3-compatible client to interact with MinIO:
+
+```bash
+# Configure AWS CLI for MinIO
+aws configure set aws_access_key_id <MINIO_ROOT_USER>
+aws configure set aws_secret_access_key <MINIO_ROOT_PASSWORD>
+aws --endpoint-url http://localhost:30091 s3 ls
+```
+
+## Configuration Management
+
+### Environment Variables
+
+All sensitive data is stored in `.env` file:
+
+```env
+# MySQL Configuration
+MYSQL_ROOT_PASSWORD=admin@123
+MYSQL_DATABASE=testdb
+MYSQL_USER=dbuser
+MYSQL_PASSWORD=dbpassword
+
+# phpMyAdmin Configuration
+PMA_HOST=mysql
+PMA_PORT=3306
+
+# MinIO Configuration
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin123
+```
+
+**Important:** Add `.env` to `.gitignore` to prevent committing secrets!
+
+### Updating Credentials
+
+To change passwords or configuration:
+
+1. Edit `.env` file
+2. Delete old data: 
+   - MySQL: `sudo rm -rf /mnt/h/mysql-data/*`
+   - MinIO: `sudo rm -rf /mnt/h/minio-data/*`
+3. Redeploy: `./cleanup.sh && ./deploy.sh`
+
+**Note:** MySQL and MinIO only use environment variables during initial setup. To change passwords on existing databases, you must reset the data.
 
 ## Testing Data Persistence
 
-### Step 1: Create Test Data
+### MySQL Persistence Test
+
+#### Step 1: Create Test Data
 
 1. Access phpMyAdmin at http://localhost:30080
 2. Login with root credentials
@@ -150,6 +241,59 @@ SELECT * FROM users;
 
 **Result:** Your data should still be there! This proves the persistent volume is working.
 
+### MinIO Persistence Test
+
+#### Step 1: Create Test Bucket and Upload File
+
+1. Access MinIO Console at http://localhost:30090
+2. Login with your MinIO credentials
+3. Create a new bucket called `test-bucket`
+4. Upload a test file to the bucket
+
+Alternatively, use AWS CLI:
+
+```bash
+# Create a test bucket
+aws --endpoint-url http://localhost:30091 s3 mb s3://test-bucket
+
+# Upload a test file
+echo "Hello MinIO!" > test.txt
+aws --endpoint-url http://localhost:30091 s3 cp test.txt s3://test-bucket/
+
+# List files
+aws --endpoint-url http://localhost:30091 s3 ls s3://test-bucket/
+```
+
+#### Step 2: Delete MinIO Pod
+
+```bash
+# Get the MinIO pod name
+kubectl get pods | grep minio
+
+# Delete the MinIO pod
+kubectl delete pod minio-0
+
+# Watch it restart
+kubectl get pods -w
+```
+
+#### Step 3: Verify Data Persistence
+
+1. Wait for the new MinIO pod to be `Running`
+2. Access MinIO Console and verify your bucket and files still exist
+
+Or use AWS CLI:
+
+```bash
+# List buckets
+aws --endpoint-url http://localhost:30091 s3 ls
+
+# List files in bucket
+aws --endpoint-url http://localhost:30091 s3 ls s3://test-bucket/
+```
+
+**Result:** Your buckets and files should still be there!
+
 ## Stress Test Scenarios
 
 ### Scenario 1: Delete MySQL Pod
@@ -176,17 +320,33 @@ kubectl scale deployment mysql --replicas=1
 kubectl delete pod -l app=phpmyadmin
 ```
 
-### Scenario 4: Delete Entire Deployment (Keep PVC)
+### Scenario 4: Delete MinIO Pod
 
 ```bash
-# Delete MySQL deployment
-kubectl delete deployment mysql
-
-# Redeploy
-kubectl apply -f mysql-deployment.yaml
+# Delete MinIO pod
+kubectl delete pod -l app=minio
+kubectl get pods -w
 ```
 
-**Important:** As long as you don't delete the PVC (`kubectl delete pvc mysql-pvc`), your data will persist!
+### Scenario 5: Delete Entire StatefulSet (Keep Data)
+
+```bash
+# Delete MySQL StatefulSet
+kubectl delete statefulset mysql
+
+# Delete MinIO StatefulSet
+kubectl delete statefulset minio
+
+# Redeploy
+kubectl apply -f mysql-statefulset.yaml
+kubectl apply -f minio-statefulset.yaml
+```
+
+**Important:** As long as you don't delete the PVCs, your data will persist!
+- MySQL PVC: `mysql-data-mysql-0`
+- MinIO PVC: `minio-data-minio-0`
+
+**Note:** StatefulSet creates PVCs with pattern: `<volumeClaimTemplate-name>-<statefulset-name>-<ordinal>`
 
 ## Load Testing (Optional)
 
@@ -203,32 +363,54 @@ ab -n 100 -c 10 http://localhost:30080/
 
 ## Monitoring
 
-### View Logs
-
 ```bash
-# MySQL logs
-kubectl logs -f deployment/mysql
+# Check pod status and logs
+kubectl get pods
+kubectl logs <pod-name>
 
-# phpMyAdmin logs
-kubectl logs -f deployment/phpmyadmin
-```
-
-### Check Resource Usage
-
-```bash
-kubectl top pods
-kubectl top nodes
-```
-
-### Describe Resources
-
-```bash
+# Describe resources
 kubectl describe pod <pod-name>
-kubectl describe pvc mysql-pvc
-kubectl describe pv mysql-pv
+kubectl describe pvc <pvc-name>
+kubectl describe pv <pv-name>
+
+# Watch pod status in real-time
+kubectl get pods -w
 ```
 
 ## Cleanup
+
+### Quick Cleanup (Recommended)
+
+```bash
+# Delete everything including secrets and PVCs
+./cleanup.sh
+```
+
+The cleanup script will remove:
+- All deployments and services
+- All StatefulSets
+- All Persistent Volumes and PVCs
+- All secrets
+
+### Manual Cleanup
+
+```bash
+# Delete all resources including secrets
+kubectl delete -f phpmyadmin-service.yaml
+kubectl delete -f phpmyadmin-deployment.yaml
+kubectl delete -f mysql-service.yaml
+kubectl delete -f mysql-statefulset.yaml
+kubectl delete -f mysql-pv.yaml
+kubectl delete -f minio-service.yaml
+kubectl delete -f minio-statefulset.yaml
+kubectl delete -f minio-pv.yaml
+kubectl delete secret mysql-secrets
+kubectl delete secret minio-secrets
+
+# Delete PVCs created by StatefulSets
+kubectl delete pvc mysql-data-mysql-0
+kubectl delete pvc minio-data-minio-0
+```
 
 ### Delete Everything (Including Data)
 
@@ -237,18 +419,25 @@ kubectl describe pv mysql-pv
 kubectl delete -f phpmyadmin-service.yaml
 kubectl delete -f phpmyadmin-deployment.yaml
 kubectl delete -f mysql-service.yaml
-kubectl delete -f mysql-deployment.yaml
+kubectl delete -f mysql-statefulset.yaml
 kubectl delete -f mysql-pv.yaml
+kubectl delete secret mysql-secrets
+
+# Also delete PVC created by StatefulSet
+kubectl delete pvc minio-data-minio-0
 ```
 
 ### Delete Only Apps (Keep Data)
 
 ```bash
-# This keeps the PV and PVC intact
+# This keeps the PVs and PVCs intact
 kubectl delete -f phpmyadmin-service.yaml
 kubectl delete -f phpmyadmin-deployment.yaml
 kubectl delete -f mysql-service.yaml
-kubectl delete -f mysql-deployment.yaml
+kubectl delete -f mysql-statefulset.yaml
+kubectl delete -f minio-service.yaml
+kubectl delete -f minio-statefulset.yaml
+# PVs and PVCs remain, data is preserved
 ```
 
 ## Troubleshooting
@@ -272,45 +461,97 @@ kubectl logs <pod-name>
    ```bash
    kubectl get svc
    ```
+2. Check if port 30080 is accessible
+3. Verify phpMyAdmin pod is running
 
-2. Check if port 30080 is accessible:
+### Can't Access MinIO Console
+
+1. Verify MinIO service is running:
    ```bash
-   netstat -an | findstr 30080  # Windows
+   kubectl get svc minio-console
    ```
-
-3. Ensure Docker Desktop Kubernetes is using localhost
+2. Check if port 30090 is accessible
+3. Verify MinIO pod is running and healthy
 
 ### PVC Stuck in Pending
 
 ```bash
 # Check PVC status
-kubectl describe pvc mysql-pvc
+kubectl describe pvc <pvc-name>
 
 # Ensure PV is available
 kubectl get pv
 ```
 
+## Advanced Features
+
+### Health Probes
+
+Both MySQL and phpMyAdmin have comprehensive health checks:
+
+#### Startup Probes
+- **MySQL:** 150 seconds max startup time (30 checks × 5s)
+- **MinIO:** 120 seconds max startup time (24 checks × 5s)
+- **phpMyAdmin:** 60 seconds max startup time (12 checks × 5s)
+- Prevents premature container restarts during slow initialization
+
+#### Liveness Probes
+- **MySQL:** Checks `mysqladmin ping` every 10s
+- **MinIO:** HTTP GET on `/minio/health/live` every 10s
+- **phpMyAdmin:** HTTP GET on port 80 every 10s
+- Restarts container if unhealthy
+
+#### Readiness Probes
+- **MySQL:** Checks `mysqladmin ping` every 5s
+- **MinIO:** HTTP GET on `/minio/health/ready` every 5s
+- **phpMyAdmin:** HTTP GET on port 80 every 5s
+- Removes pod from service endpoints if not ready
+
+### Graceful Shutdown
+
+#### MySQL & MinIO
+- **terminationGracePeriodSeconds:** 30 seconds
+- Allows time for proper shutdown and connection cleanup
+
+#### phpMyAdmin
+- **terminationGracePeriodSeconds:** 30 seconds
+  - Allow active HTTP requests to complete
+  - Gracefully close connections
+
+### Secret Management
+
+- Credentials stored in Kubernetes Secrets
+- Created from `.env` file during deployment
+- Environment variables injected using `envFrom: secretRef`
+- Separation of config from code
+- Separate secrets for MySQL and MinIO
+
 ## Configuration Details
 
-### Database Credentials
-- Root Password: `rootpassword`
-- Database: `testdb`
-- User: `dbuser`
-- Password: `dbpassword`
-
 ### Ports
-- MySQL: Internal port 3306 (ClusterIP)
-- phpMyAdmin: External port 30080 (NodePort)
+- **MySQL:** Internal port 3306 (ClusterIP - headless service)
+- **MinIO API:** Port 9000 (Internal), Port 30091 (NodePort)
+- **MinIO Console:** Port 9001 (Internal), Port 30090 (NodePort)
+- **phpMyAdmin:** Port 80 (Internal), Port 30080 (NodePort)
 
 ### Storage
-- Volume Size: 5Gi
-- Storage Location: `/mnt/data/mysql` (on Docker Desktop VM)
-- Access Mode: ReadWriteOnce
+- **MySQL:**
+  - Volume Size: 5Gi
+  - Storage Location: `/mnt/h/mysql-data` (host path)
+  - Access Mode: ReadWriteOnce
+  - Reclaim Policy: Retain
+- **MinIO:**
+  - Volume Size: 10Gi
+  - Storage Location: `/mnt/h/minio-data` (host path)
+  - Access Mode: ReadWriteOnce
+  - Reclaim Policy: Retain
 
 ## Key Concepts Demonstrated
 
- **Persistent Volumes:** Data survives pod deletions
- **StatefulSets Alternative:** Using PV with Deployment
- **Service Discovery:** phpMyAdmin connects to MySQL using service name
- **Resource Limits:** CPU and memory limits prevent resource exhaustion
- **Health Checks:** Kubernetes automatically restarts failed pods
+✓ **Persistent Volumes:** Data survives pod deletions
+✓ **StatefulSets:** Stable network identities and persistent storage
+✓ **Service Discovery:** Applications connect using Kubernetes service names
+✓ **Resource Limits:** CPU and memory limits prevent resource exhaustion
+✓ **Health Checks:** Kubernetes automatically restarts failed pods
+✓ **S3-Compatible Storage:** MinIO provides object storage with AWS S3 API
+✓ **Multi-Service Architecture:** Database, object storage, and admin interface working together
